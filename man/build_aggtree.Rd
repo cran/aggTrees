@@ -2,7 +2,7 @@
 % Please edit documentation in R/aggregation-trees.R
 \name{build_aggtree}
 \alias{build_aggtree}
-\alias{analyze_aggtree}
+\alias{inference_aggtree}
 \title{Aggregation Trees}
 \usage{
 build_aggtree(
@@ -17,13 +17,7 @@ build_aggtree(
   ...
 )
 
-analyze_aggtree(
-  object,
-  n_groups,
-  method = "aipw",
-  scores = NULL,
-  verbose = TRUE
-)
+inference_aggtree(object, n_groups)
 }
 \arguments{
 \item{y}{Outcome vector.}
@@ -34,11 +28,11 @@ analyze_aggtree(
 
 \item{honest_frac}{Fraction of observations to be allocated to honest sample.}
 
-\item{method}{Either \code{"raw"} or \code{"aipw"}, controls how GATEs are estimated.}
+\item{method}{Either \code{"raw"} or \code{"aipw"}, controls how node predictions are computed.}
 
-\item{scores}{Optional, vector of scores to be used in estimating GATEs. Useful to save computational time if scores have already been estimated. Ignored if \code{method == "raw"}.}
+\item{scores}{Optional, vector of scores to be used in computing node predictions. Useful to save computational time if scores have already been estimated. Ignored if \code{method == "raw"}.}
 
-\item{cates}{Estimated CATEs. If not provided by the user, CATEs are estimated internally via a \code{\link[grf]{causal_forest}}.}
+\item{cates}{Optional, estimated CATEs. If not provided by the user, CATEs are estimated internally via a \code{\link[grf]{causal_forest}}.}
 
 \item{is_honest}{Logical vector denoting which observations belong to the honest sample. Required only if the \code{cates} argument is used.}
 
@@ -47,60 +41,92 @@ analyze_aggtree(
 \item{object}{An \code{aggTrees} object.}
 
 \item{n_groups}{Number of desired groups.}
-
-\item{verbose}{Logical, whether to print in console.}
 }
 \value{
-\code{\link{build_aggtree}} returns an \code{aggTrees} object. \code{\link{analyze_aggtree}} returns the fitted model, as an
-\code{\link[estimatr]{lm_robust}} object, and the scores (if \code{method == "raw"}, this is \code{NULL}). Additionally,
-it prints LATEX code in the console if \code{verbose == TRUE} (the default).
+\code{\link{build_aggtree}} returns an \code{aggTrees} object.\cr
+
+\code{\link{inference_aggtree}} returns an \code{aggTrees.inference} object, which in turn contains the \code{aggTrees} object used
+in the call.
 }
 \description{
 Nonparametric data-driven approach to discovering heterogeneous subgroups in a selection-on-observables framework.
 The approach constructs a sequence of groupings, one for each level of granularity. Groupings are nested and
-feature an optimality property. For each grouping, we obtain point estimation and inference about group average
-treatment effects (GATEs). Additionally, we compute the average characteristics of units in each group.
+feature an optimality property. For each grouping, we obtain point estimation and standard errors for the group average
+treatment effects (GATEs). Additionally, we assess whether systematic heterogeneity is found by testing the hypotheses
+that the differences in the GATEs across all pairs of groups are zero. Finally, we investigate the driving mechanisms of
+effect heterogeneity by computing the average characteristics of units in each group.
 }
 \details{
-Aggregation trees are a three-step procedure. First, CATEs are estimated using any estimator. Second, a tree is grown
-to approximate the CATEs. Third, the tree is pruned to derive a nested sequence of optimal groupings, one for each
-granularity level. For each level of granularity, we can obtain point estimation and inference about GATEs.\cr
+Aggregation trees are a three-step procedure. First, the conditional average treatment effects (CATEs) are estimated using any
+estimator. Second, a tree is grown to approximate the CATEs. Third, the tree is pruned to derive a nested sequence of optimal
+groupings, one for each granularity level. For each level of granularity, we can obtain point estimation and inference about
+the GATEs.\cr
 
-\code{\link{build_aggtree}} constructs the sequence of groupings and estimate GATEs in each node. GATEs can be estimated
-in several ways. This is controlled by the \code{method} argument. If \code{method == "raw"}, we compute the difference
-in mean outcomes between treated and control observations in each node. This is an unbiased estimator in randomized experiment.
-If \code{method == "aipw"}, we construct doubly-robust scores and average them in each node. This is unbiased also in
-observational studies. Honest regression forests and 5-fold cross fitting are used to estimate the propensity score and the
-conditional mean function of the outcome (unless the user specifies the argument \code{scores}).\cr
+To implement this methodology, the user can rely on two core functions that handle the various steps.\cr
+\subsection{Constructing the Sequence of Groupings}{
 
-The user can provide a vector of estimated CATEs via the \code{cates} argument. If so, the user needs to specify a logical
+\code{\link{build_aggtree}} constructs the sequence of groupings (i.e., the tree) and estimate the GATEs in each node. The
+GATEs can be estimated in several ways. This is controlled by the \code{method} argument. If \code{method == "raw"}, we
+compute the difference in mean outcomes between treated and control observations in each node. This is an unbiased estimator
+in randomized experiment. If \code{method == "aipw"}, we construct doubly-robust scores and average them in each node. This
+is unbiased also in observational studies. Honest regression forests and 5-fold cross fitting are used to estimate the
+propensity score and the conditional mean function of the outcome (unless the user specifies the argument \code{scores}).\cr
+
+The user can provide a vector of the estimated CATEs via the \code{cates} argument. If so, the user needs to specify a logical
 vector to denote which observations belong to the honest sample. If honesty is not desired, \code{is_honest} must be a
 vector of \code{FALSE}s. If no vector of CATEs is provided, these are estimated internally via a
 \code{\link[grf]{causal_forest}}.\cr
+}
 
-The tree is grown up to some stopping criteria that can be specified by the user. Please refer to
-the \code{\link[rpart]{rpart.control}} documentation for this.\cr
+\subsection{GATEs Estimation and Inference}{
 
-\code{\link{analyze_aggtree}} takes as input an \code{aggTrees} object constructed by \code{\link{build_aggtree}}. Then, for the
-desired granularity level, chosen via the \code{n_groups} argument, it provides point estimation and inference about
-GATEs, together with the average characteristics of the units in each group. As before, the \code{method} argument controls
-how GATEs are estimated. If \code{method == "raw"}, we estimate via OLS the following linear model:
+\code{\link{inference_aggtree}} takes as input an \code{aggTrees} object constructed by \code{\link{build_aggtree}}. Then, for
+the desired granularity level, chosen via the \code{n_groups} argument, it provides point estimation and standard errors for
+the GATEs. Additionally, it performs some hypothesis testing to assess whether we find systematic heterogeneity and computes
+the average characteristics of the units in each group to investigate the driving mechanisms.
+\subsection{Point estimates and standard errors for the GATEs}{
+
+GATEs and their standard errors are obtained by fitting an appropriate linear model. If \code{method == "raw"}, we estimate
+via OLS the following:
 
 \deqn{Y_i = \sum_{l = 1}^{|T|} L_{i, l} \gamma_l + \sum_{l = 1}^{|T|} L_{i, l} D_i \beta_l + \epsilon_i}
 
-with \code{L_{i, l}} a dummy variable equal to one if the i-th unit falls in the l-th group, and \code{|T|} the
-number of groups. If the treatment is randomly assigned, one can show that the estimated betas identify the GATEs of
-each group. Thus, we can interpret the OLS results as usual. However, in observational studies these estimates are biased
-due to selection into treatment. To get unbiased estimates, we can set \code{method} to \code{"aipw"} to construct
-doubly-robust scores \code{y_i^*} and use them as a pseudo-outcome in the following regression:
+with \code{L_{i, l}} a dummy variable equal to one if the i-th unit falls in the l-th group, and |T| the
+number of groups. If the treatment is randomly assigned, one can show that the betas identify the GATE of
+each group. However, this is not true in observational studies due to selection into treatment. In this case, the user is
+expected to use \code{method == "aipw"} when calling \code{\link{build_aggtree}}. In this case,
+\code{\link{inference_aggtree}} uses the scores in the following regression:
 
-\deqn{Y_i^* = \sum_{l = 1}^{|T|} L_{i, l} \beta_l + \epsilon_i}
+\deqn{score_i = \sum_{l = 1}^{|T|} L_{i, l} \beta_l + \epsilon_i}
 
-This way, we get unbiased GATEs estimates, and we can again interpret OLS results as usual.\cr
+This way, betas again identify the GATEs. Regardless of \code{method}, standard errors are estimated via the Eicker-Huber-White
+estimator.
+}
 
-Regardless of the chosen \code{method}, both functions estimate GATEs using observations in the honest sample. If the honest
-sample is empty, the same data used to construct the tree are used to estimate GATEs. This is fine for prediction but
-invalidates the inference obtained by \code{\link{analyze_aggtree}}.
+\subsection{Hypothesis testing}{
+
+\code{\link{inference_aggtree}} uses the standard errors obtained by fitting the linear models above to test the hypotheses
+that the GATEs are different across all pairs of leaves. Here, we adjust p-values to account for multiple hypotheses testing
+using Holm's procedure.
+}
+
+\subsection{Average Characteristics}{
+
+\code{\link{inference_aggtree}} regresses each covariate on a set of dummies denoting group membership. This way, we get the
+average characteristics of units in each leaf, together with a standard error. Leaves are ordered in increasing order of their
+predictions (from most negative to most positive). Standard errors are estimated via the Eicker-Huber-White estimator.
+}
+
+}
+
+\subsection{Caution on Inference}{
+
+Regardless of the chosen \code{method}, both functions estimate the GATEs, the linear models, and the average characteristics
+of units in each group using only observations in the honest sample. If the honest sample is empty (this happens because the
+user either sets \code{honest_frac = 0} or passes a vector of \code{FALSE}s as \code{is_honest} when calling
+\code{\link{build_aggtree}}), the same data used to construct the tree are used to estimate the above quantities. This is
+fine for prediction but invalidates inference.
+}
 }
 \examples{
 \donttest{
@@ -117,10 +143,10 @@ mu0 <- 0.5 * X[, 1]
 mu1 <- 0.5 * X[, 1] + X[, 2]
 y <- mu0 + D * (mu1 - mu0) + rnorm(n)
 
-## Construct sequence of groupings. CATEs estimated internally,
+## Construct sequence of groupings. CATEs estimated internally.
 groupings <- build_aggtree(y, D, X, method = "aipw")
 
-## We can estimate CATEs and pass them.
+## Alternatively, we can estimate the CATEs and pass them.
 splits <- sample_split(length(y), training_frac = 0.5)
 training_idx <- splits$training_idx
 honest_idx <- splits$honest_idx
@@ -149,18 +175,26 @@ plot(groupings) # Try also setting 'sequence = TRUE'.
 tree <- subtree(groupings$tree, cv = TRUE) # Select by cross-validation.
 predict(tree, data.frame(X))
 
-## Analyze results with 4 groups.
-results <- analyze_aggtree(groupings, n_groups = 4, method = "aipw", scores = groupings$scores)
-summary(results$model)}
+## Inference with 4 groups.
+results <- inference_aggtree(groupings, n_groups = 4)
+
+summary(results$model) # Coefficient of leafk is GATE in k-th leaf.
+
+results$gates_diff_pairs$gates_diff # GATEs differences.
+results$gates_diff_pairs$holm_pvalues # leaves 1-2 not statistically different.
+
+## LATEX.
+print(results, table = "diff")
+print(results, table = "avg_char")}
 
 }
 \references{
 \itemize{
-  \item R Di Francesco (2022). Aggregation Trees. CEIS Research Paper, 546. \doi{10.2139/ssrn.4304256}.
+\item R Di Francesco (2022). Aggregation Trees. CEIS Research Paper, 546. \doi{10.2139/ssrn.4304256}.
 }
 }
 \seealso{
-\code{\link{plot.aggTrees}}
+\code{\link{plot.aggTrees}} \code{\link{print.aggTrees.inference}}
 }
 \author{
 Riccardo Di Francesco
