@@ -2,7 +2,7 @@
 % Please edit documentation in R/utils.R
 \name{rename_latex}
 \alias{rename_latex}
-\title{Renaming Variables for LATEX Usage (Internal Use)}
+\title{Renaming Variables for LATEX Usage}
 \usage{
 rename_latex(names)
 }
@@ -13,5 +13,6 @@ rename_latex(names)
 The renamed string vector. Strings where "_" is not found are not modified by \code{rename_latex}.
 }
 \description{
-Renames variables where the character "_" is used, which causes clashes in LATEX. Useful for the \code{phased} print method.
+Renames variables where the character "_" is used, which causes clashes in LATEX.
 }
+\keyword{internal}

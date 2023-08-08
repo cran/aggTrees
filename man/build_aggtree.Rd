@@ -17,7 +17,7 @@ build_aggtree(
   ...
 )
 
-inference_aggtree(object, n_groups)
+inference_aggtree(object, n_groups, boot_ci = FALSE, boot_R = 2000)
 }
 \arguments{
 \item{y}{Outcome vector.}
@@ -41,6 +41,10 @@ inference_aggtree(object, n_groups)
 \item{object}{An \code{aggTrees} object.}
 
 \item{n_groups}{Number of desired groups.}
+
+\item{boot_ci}{Logical, whether to compute bootstrap confidence intervals.}
+
+\item{boot_R}{Number of bootstrap replications. Ignored if \code{boot_ci == FALSE}.}
 }
 \value{
 \code{\link{build_aggtree}} returns an \code{aggTrees} object.\cr
@@ -99,8 +103,12 @@ expected to use \code{method == "aipw"} when calling \code{\link{build_aggtree}}
 
 \deqn{score_i = \sum_{l = 1}^{|T|} L_{i, l} \beta_l + \epsilon_i}
 
-This way, betas again identify the GATEs. Regardless of \code{method}, standard errors are estimated via the Eicker-Huber-White
-estimator.
+This way, betas again identify the GATEs.\cr
+
+Regardless of \code{method}, standard errors are estimated via the Eicker-Huber-White estimator.\cr
+
+If \code{boot_ci == TRUE}, the routine also computes asymmetric bias-corrected and accelerated 95\% confidence intervals using 2000 bootstrap
+samples. Particularly useful when the honest sample is small-ish.
 }
 
 \subsection{Hypothesis testing}{
@@ -129,8 +137,7 @@ fine for prediction but invalidates inference.
 }
 }
 \examples{
-\donttest{
-## Generate data.
+\donttest{## Generate data.
 set.seed(1986)
 
 n <- 1000
@@ -173,7 +180,7 @@ plot(groupings) # Try also setting 'sequence = TRUE'.
 
 ## To predict, do the following.
 tree <- subtree(groupings$tree, cv = TRUE) # Select by cross-validation.
-predict(tree, data.frame(X))
+head(predict(tree, data.frame(X)))
 
 ## Inference with 4 groups.
 results <- inference_aggtree(groupings, n_groups = 4)

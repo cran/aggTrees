@@ -38,11 +38,11 @@
 #' @export
 subtree <- function(tree, leaves = NULL, cv = FALSE) {
   ## Handling inputs and checks.
-  if(!(inherits(tree, "rpart"))) stop("You must provide a valid aggTrees object.", call. = FALSE)
-  if (!(cv %in% c(TRUE, FALSE))) stop("'cv' must be either TRUE or FALSE.", call. = FALSE)
+  if(!(inherits(tree, "rpart"))) stop("Invalid 'tree'. This must be an aggTrees object.", call. = FALSE)
+  if (!(cv %in% c(TRUE, FALSE))) stop("Invalid 'cv'. must be either TRUE or FALSE.", call. = FALSE)
   if (is.null(leaves) & cv == FALSE) stop("Invalid combination of 'leaves' and 'cv'. Please specify a number of leaves or select the cross-validation option.", call. = FALSE)
   if (!is.null(leaves)) {
-    if (leaves < 1) stop("'leaves' must be a positive number.", call. = FALSE)
+    if (leaves < 1) stop("Invalid 'leaves'. This must be a positive number.", call. = FALSE)
     if (leaves > get_leaves(tree)) stop("'leaves' is greater than the number of leaves of 'tree'. Please provide a deeper 'tree'.", call. = FALSE)
   }
 
@@ -86,7 +86,7 @@ subtree <- function(tree, leaves = NULL, cv = FALSE) {
 #'
 #' @export
 get_leaves <- function(tree) {
-  if (!inherits(tree, "rpart")) stop("'tree' must be a rpart object.")
+  if (!inherits(tree, "rpart")) stop("Invalid 'tree'. This must be an rpart object.")
 
   return(dim(tree$frame[tree$frame$var == "<leaf>", ])[1])
 }
@@ -122,7 +122,7 @@ get_leaves <- function(tree) {
 #'
 #' ## Extract number of leaves.
 #' is_in_third_node <- node_membership(tree, X, 3)
-#' is_in_third_node
+#' head(is_in_third_node)
 #'
 #' @importFrom utils capture.output
 #'
@@ -168,7 +168,7 @@ node_membership <- function(tree, X, node) {                 # Taken from https:
 #'
 #' ## Extract number of leaves.
 #' leaves_factor <- leaf_membership(tree, X)
-#' leaves_factor
+#' head(leaves_factor)
 #'
 #' @author Riccardo Di Francesco
 #'
@@ -176,7 +176,7 @@ node_membership <- function(tree, X, node) {                 # Taken from https:
 #'
 #' @export
 leaf_membership <- function(tree, X) {
-  if (!inherits(tree, "rpart")) stop("'tree' must be a rpart object.")
+  if (!inherits(tree, "rpart")) stop("Invalid 'tree'. This must be an rpart object.")
   if (!is.matrix(X) & !is.data.frame(X)) stop("'X' must be either a matrix or a data frame.", call. = FALSE)
 
   ## Inspired by https://bookdown.org/halflearned/tutorial/hte1.html.
@@ -264,12 +264,21 @@ leaf_membership <- function(tree, X) {
 #' @export
 estimate_rpart <- function(tree, y, D, X, method = "aipw", scores = NULL) {
   ## Handling inputs and checks.
-  if (!inherits(tree, "rpart")) stop("'tree' must be a rpart object.", call. = FALSE)
-  if (!(method %in% c("raw", "aipw"))) stop("You must provide a valid method.", call. = FALSE)
+  if (!inherits(tree, "rpart")) stop("'Invalid 'tree'. This must be an rpart object.", call. = FALSE)
+  if (!(method %in% c("raw", "aipw"))) stop("Invalid 'method'. This must be either 'raw' or 'aipw'.", call. = FALSE)
 
-  new_tree <- tree
+  leaves <- leaf_membership(tree, X)
+  n_leaves <- get_leaves(tree)
+
+  if (length(unique(leaves)) < n_leaves) warning("One or more leaves are empty: No observations in 'X' falls there.")
+
+  for (leaf in seq_len(n_leaves)) {
+    if (method == "raw" & length(unique(D[leaves == leaf])) == 1) stop("One or more leaves contain only treated or control observations. This is incompatible with 'method = raw'.", call. = FALSE)
+  }
 
   ## Replace node predictions.
+  new_tree <- tree
+
   if (method == "raw") {
     new_tree$frame$yval[1] <- mean(y[D == 1]) - mean(y[D == 0])
 
@@ -312,11 +321,14 @@ estimate_rpart <- function(tree, y, D, X, method = "aipw", scores = NULL) {
 #' @param X Covariate matrix (no intercept).
 #' @param method Either \code{"raw"} or \code{"aipw"}, defines the outcome used in the regression.
 #' @param scores Optional, vector of scores to be used in the regression. Useful to save computational time if scores have already been estimated. Ignored if \code{method == "raw"}.
+#' @param boot_ci Logical, whether to compute bootstrap confidence intervals.
+#' @param boot_R Number of bootstrap replications. Ignored if \code{boot_ci == FALSE}.
 #'
 #' @return
 #' A list storing:
 #'   \item{\code{model}}{The model fitted to get point estimates and standard errors for the GATEs, as an \code{\link[estimatr]{lm_robust}} object.}
 #'   \item{\code{gates_diff_pairs}}{Results of testing whether GATEs differ across all pairs of leaves. This is a list storing GATEs differences and p-values adjusted using Holm's procedure (check \code{\link[stats]{p.adjust}}). \code{NULL} if the tree consists of a root only.}
+#'   \item{\code{boot_ci}}{Bootstrap confidence intervals (this is an empty list if \code{boot_ci == FALSE}.}
 #'   \item{\code{scores}}{Vector of doubly robust scores. \code{NULL} if \code{method == 'raw'}.}
 #'
 #' @examples
@@ -378,6 +390,9 @@ estimate_rpart <- function(tree, y, D, X, method = "aipw", scores = NULL) {
 #'
 #' Regardless of \code{method}, standard errors are estimated via the Eicker-Huber-White estimator.\cr
 #'
+#' If \code{boot_ci == TRUE}, the routine also computes asymmetric bias-corrected and accelerated 95% confidence intervals using 2000 bootstrap
+#' samples.\cr
+#'
 #' If \code{tree} consists of a root only, \code{causal_ols_rpart} regresses \code{y} on a constant and \code{D} if
 #' \code{method == "raw"}, or regresses the doubly-robust scores on a constant if \code{method == "aipw"}. This way,
 #' we get an estimate of the overall average treatment effect.
@@ -403,14 +418,23 @@ estimate_rpart <- function(tree, y, D, X, method = "aipw", scores = NULL) {
 #' @seealso \code{\link{estimate_rpart}} \code{\link{avg_characteristics_rpart}}
 #'
 #' @export
-causal_ols_rpart <- function(tree, y, D, X, method = "aipw", scores = NULL) {
-  if (!inherits(tree, "rpart")) stop("'tree' must be a rpart object.", call. = FALSE)
-  if(!(method %in% c("raw", "aipw"))) stop("Invalid 'method'. It must be either 'raw' or 'aipw'.", call. = FALSE)
+causal_ols_rpart <- function(tree, y, D, X, method = "aipw", scores = NULL,
+                             boot_ci = FALSE, boot_R = 2000) {
+  ## Handling inputs and checks.
+  if (!inherits(tree, "rpart")) stop("Invalid 'tree'. This must be an rpart object.", call. = FALSE)
+  if(!(method %in% c("raw", "aipw"))) stop("Invalid 'method'. This must be either 'raw' or 'aipw'.", call. = FALSE)
+  if (!(boot_ci %in% c(FALSE, TRUE))) stop("Invalid 'boot_ci'. This must be either FALSE or TRUE.", call. = FALSE)
+  if (boot_R < 0) stop("Invalid 'boot_R'. This must be a positive integer.", call. = FALSE)
 
-  ## Generate leaves indicators.
   leaves <- leaf_membership(tree, X)
   n_leaves <- get_leaves(tree)
-  if (length(unique(leaves)) < n_leaves) warning("One or more leaves are empty: No observations in X fall there.")
+
+  if (length(unique(leaves)) < n_leaves) warning("One or more leaves are empty: No observations in 'X' falls there.")
+
+  for (leaf in seq_len(n_leaves)) {
+    if (sum(leaves == leaf) == 1) stop("One or more leaves contain only one observation of 'X', thus we cannot get standard errors there. \nTry with a lower number of groups or a bigger 'X'.", call. = FALSE)
+    if (method == "raw" & length(unique(D[leaves == leaf])) == 1) stop("One or more leaves contain only treated or control observations. This is incompatible with 'method = raw'.", call. = FALSE)
+  }
 
   ## GATEs point estimates and standard errors.
   if (method == "raw") {
@@ -465,7 +489,7 @@ causal_ols_rpart <- function(tree, y, D, X, method = "aipw", scores = NULL) {
       }
     }
 
-    p_values_vec <- c(p_values) # First column, then second columns, then third columns ...
+    p_values_vec <- c(p_values) # First column, then second column, then third column ...
     p_values_holm_vec <- stats::p.adjust(p_values_vec, method = "holm")
     p_values_holm <- matrix(p_values_holm_vec, nrow = n_leaves, ncol = n_leaves)
 
@@ -474,9 +498,57 @@ causal_ols_rpart <- function(tree, y, D, X, method = "aipw", scores = NULL) {
     gates_diff_pairs <- NULL
   }
 
+  ## Bootstrap confidence intervals, if required.
+  if (boot_ci) {
+    # Extract GATEs indexes according to estimation strategy.
+    if (method == "raw") {
+      if (length(unique(leaves)) == 1) {
+        gates_idx <- 2
+      } else {
+        gates_idx <- which(sapply(names(model$coefficients), function(x) grepl(":D", x)))
+      }
+    } else if (method == "aipw") {
+      if (length(unique(leaves)) == 1) {
+        gates_idx <- 1
+      } else {
+        gates_idx <- which(sapply(names(model$coefficients), function(x) grepl("leaf", x)))
+      }
+    }
+
+    # Define function input for boot::boot().
+    boot_fun <- function(data, idx) {
+      data_star <- data[idx, ] # It must contain y, D, scores, and leaves.
+      if (method == "raw") {
+        if (length(unique(leaves)) == 1) {
+          model <- estimatr::lm_robust(y ~ D, data = data.frame("y" = data_star$y, "D" = data_star$D), se_type = "HC1")
+        } else {
+          model <- estimatr::lm_robust(y ~ 0 + leaf + D:leaf, data = data.frame("y" = data_star$y, "leaf" = data_star$leaves, "D" = data_star$D), se_type = "HC1")
+        }
+      } else if (method == "aipw") {
+        if (length(unique(leaves)) == 1) {
+          model <- estimatr::lm_robust(scores ~ 1, data = data.frame("scores" = scores[idx]), se_type = "HC1")
+        } else {
+          model <- estimatr::lm_robust(scores ~ 0 + leaf, data = data.frame("scores" = scores[idx], "leaf" = data_star$leaves), se_type = "HC1")
+        }
+      }
+
+      return(coef(model)[gates_idx])
+    }
+
+    # Run bootstrap and compute confidence intervals.
+    boot_out <- boot::boot(data.frame(y, D, X, leaves), boot_fun, R = boot_R)
+
+    boot_ci_lower <- broom::tidy(boot_out, conf.int = TRUE, conf.method = "bca")$conf.low
+    boot_ci_upper <- broom::tidy(boot_out, conf.int = TRUE, conf.method = "bca")$conf.high
+
+    names(boot_ci_lower) <- names(gates_idx)
+    names(boot_ci_upper) <- names(gates_idx)
+  }
+
   ## Output.
   return(list("model" = model,
               "gates_diff_pairs" = gates_diff_pairs,
+              "boot_ci" = if (boot_ci) list("lower" = boot_ci_lower, "upper" = boot_ci_upper) else list(),
               "scores" = scores))
 }
 
@@ -535,7 +607,7 @@ causal_ols_rpart <- function(tree, y, D, X, method = "aipw", scores = NULL) {
 #' @export
 avg_characteristics_rpart <- function(tree, X) {
   ## Handling inputs and checks.
-  if (!inherits(tree, "rpart")) stop("'tree' must be a rpart object.", call. = FALSE)
+  if (!inherits(tree, "rpart")) stop("Invalid 'tree'. This must be an rpart object.", call. = FALSE)
 
   ## Generate leaves indicators.
   leaves <- leaf_membership(tree, X)
