@@ -28,8 +28,7 @@ shades. Moreover, predictions that are more distant in absolute value from the A
 This way, we have an immediate understanding of the groups with extreme GATEs.
 }
 \examples{
-\donttest{
-## Generate data.
+\donttest{## Generate data.
 set.seed(1986)
 
 n <- 1000
@@ -40,10 +39,25 @@ colnames(X) <- paste0("x", seq_len(k))
 D <- rbinom(n, size = 1, prob = 0.5)
 mu0 <- 0.5 * X[, 1]
 mu1 <- 0.5 * X[, 1] + X[, 2]
-y <- mu0 + D * (mu1 - mu0) + rnorm(n)
+Y <- mu0 + D * (mu1 - mu0) + rnorm(n)
 
-## Construct sequence of groupings. CATEs estimated internally,
-groupings <- build_aggtree(y, D, X, method = "aipw")
+## Training-honest sample split.
+honest_frac <- 0.5
+splits <- sample_split(length(Y), training_frac = (1 - honest_frac))
+training_idx <- splits$training_idx
+honest_idx <- splits$honest_idx
+
+Y_tr <- Y[training_idx]
+D_tr <- D[training_idx]
+X_tr <- X[training_idx, ]
+
+Y_hon <- Y[honest_idx]
+D_hon <- D[honest_idx]
+X_hon <- X[honest_idx, ]
+
+## Construct sequence of groupings. CATEs estimated internally.
+groupings <- build_aggtree(Y_tr, D_tr, X_tr,
+                           Y_hon, D_hon, X_hon)
 
 ## Plot.
 plot(groupings)
@@ -53,7 +67,7 @@ plot(groupings, sequence = TRUE)}
 }
 \references{
 \itemize{
-  \item R Di Francesco (2022). Aggregation Trees. CEIS Research Paper, 546. \doi{10.2139/ssrn.4304256}.
+  \item Di Francesco, R. (2022). Aggregation Trees. CEIS Research Paper, 546. \doi{10.2139/ssrn.4304256}.
 }
 }
 \seealso{

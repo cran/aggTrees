@@ -14,15 +14,35 @@ knitr::opts_chunk$set(
 )
 
 library(aggTrees)
+library(grf)
 ```
 
-In this tutorial, we show a typical usage of the package. For illustration purposes, let us generate some data:
+In this tutorial, we show how to use the `aggTrees` package to discover heterogeneous subgroups in a selection-on-observables setting. 
 
-```{r data-generation, eval = FALSE}
+## Methodology Overview
+The approach consists of three steps:
+
+1. Estimate the conditional average treatment effects (CATEs);
+2. Approximate the CATEs by a decision tree;
+3. Prune the tree.
+
+This way, we generate a sequence of groupings, one for each granularity level. 
+
+The resulting sequence is nested in the sense that subgroups formed at a given level of granularity are never broken at coarser levels. This guarantees consistency of the results across the different granularity levels, generally considered a basic requirement that every classification system should satisfy. Moreover, each grouping features an optimality property in that it ensures that the loss in
+explained heterogeneity resulting from aggregation is minimized.
+
+Given the sequence of groupings, we can estimate the group average treatment effects (GATEs) as we like. The package supports two estimators, based on differences in mean outcomes between treated and control units (unbiased only in randomized experiments) and on debiased machine learning procedures (unbiased also in observational studies). 
+
+The package also allows to get standard errors for the GATEs by estimating via OLS appropriate linear models. Then, under an "honesty" condition, we can use the estimated standard errors to conduct valid inference about the GATEs as usual, e.g., by constructing conventional confidence intervals.[^1]
+
+## Code
+For illustration purposes, let us generate some data. We also split the observed sample into a training sample and an honest sample of equal sizes, as this will be necessary to achieve valid inference about the GATEs later on.
+
+```{r data-generation, eval = TRUE}
 ## Generate data.
 set.seed(1986)
 
-n <- 1000
+n <- 500 # Small sample size due to compliance with CRAN notes.
 k <- 3
 
 X <- matrix(rnorm(n * k), ncol = k)
@@ -30,43 +50,46 @@ colnames(X) <- paste0("x", seq_len(k))
 D <- rbinom(n, size = 1, prob = 0.5)
 mu0 <- 0.5 * X[, 1]
 mu1 <- 0.5 * X[, 1] + X[, 2]
-y <- mu0 + D * (mu1 - mu0) + rnorm(n)
-```
+Y <- mu0 + D * (mu1 - mu0) + rnorm(n)
 
-### Constructing the Sequence of Groupings
-To construct the sequence of optimal groupings, we first need to estimate the CATEs. Here we use the causal forest estimator. To achieve valid inference about the GATEs, we split the sample into a training sample and an honest sample of equal sizes. The forest is built using only the training sample.
-
-```{r estimate-cates, eval = FALSE}
 ## Sample split.
-splits <- sample_split(length(y), training_frac = 0.5)
+splits <- sample_split(length(Y), training_frac = 0.5)
 training_idx <- splits$training_idx
 honest_idx <- splits$honest_idx
 
-y_tr <- y[training_idx]
+Y_tr <- Y[training_idx]
 D_tr <- D[training_idx]
 X_tr <- X[training_idx, ]
 
-y_hon <- y[honest_idx]
+Y_hon <- Y[honest_idx]
 D_hon <- D[honest_idx]
 X_hon <- X[honest_idx, ]
-
-## Estimate the CATEs. Use only training sample.
-library(grf)
-forest <- causal_forest(X_tr, y_tr, D_tr) 
-cates <- predict(forest, X)$predictions
 ```
 
+### CATEs Estimation
+First, we need to estimate the CATEs. This can be achieved with any estimator we like. Here we use the causal forest estimator. The CATEs are estimated using only the training sample.
+
+```{r estimate-cates, eval = TRUE}
+## Estimate the CATEs. Use only training sample.
+forest <- causal_forest(X_tr, Y_tr, D_tr) 
+
+cates_tr <- predict(forest, X_tr)$predictions
+cates_hon <- predict(forest, X_hon)$predictions
+```
+
+### Constructing the Sequence of Groupings
 Now we use the `build_aggtree` function to construct the sequence of groupings. This function approximates the estimated CATEs by a decision tree using only the training sample and computes node predictions (i.e., the GATEs) using only the honest sample. `build_aggtree` allows the user to choose between two GATE estimators:
 
 1. If we set `method = "raw"`, the GATEs are estimated by taking the differences between the mean outcomes of treated and control units in each node. This is an unbiased estimator (only) in randomized experiments;
-2. If we set `method = "aipw"`, the GATEs are estimated by averaging doubly-robust scores (see Appendix below) in each node. This is an unbiased estimator also in observational studies under particular conditions on the construction of the scores.
+2. If we set `method = "aipw"`, the GATEs are estimated by averaging doubly-robust scores in each node. This is an unbiased estimator also in observational studies under particular conditions on the construction of the scores.[^2]
 
-The doubly-robust scores can be estimated separately and passed in by the `scores` argument. Otherwise, they are estimated internally. Notice the use of the `is_honest` argument, a logical vector denoting which observations we allocated to the honest sample. This way, `build_aggtree` knows which observations must be used to construct the tree and compute node predictions. 
+The doubly-robust scores are estimated internally using 5-fold cross-fitting and only observations from the honest sample.
 
-```{r construct-sequence, eval = FALSE}
-## Construct the sequence. Use doubly-robust scores.
-groupings <- build_aggtree(y, D, X, method = "aipw", 
-                           cates = cates, is_honest = 1:length(y) %in% honest_idx)
+```{r construct-sequence, eval = TRUE}
+## Construct the sequence. Use doubly-robust scores (default option).
+groupings <- build_aggtree(Y_tr, D_tr, X_tr, # Training sample. 
+                           Y_hon, D_hon, X_hon, # Honest sample.
+                           cates_tr = cates_tr, cates_hon = cates_hon) # Predicted CATEs.
 
 ## Print.
 print(groupings)
@@ -78,42 +101,22 @@ plot(groupings) # Try also setting 'sequence = TRUE'.
 ### Further Analysis
 Now that we have a whole sequence of optimal groupings, we can pick the grouping associated with our preferred granularity level and call the `inference_aggtree` function. This function does the following:
 
-1. It gets standard errors for the GATEs by estimating via OLS appropriate linear models using the honest sample. The choice of the linear model depends on the `method` we used when we called `build_aggtree` (see Appendix below);
+1. It gets standard errors for the GATEs by estimating via OLS appropriate linear models using the honest sample. The choice of the linear model depends on the `method` we used when we called `build_aggtree`;[^3]
 2. It tests the null hypotheses that the differences in the GATEs across all pairs of groups equal zero. Here, we account for multiple hypotheses testing by adjusting the $p$-values using Holm's procedure;
 3. It computes the average characteristics of the units in each group.
 
 To report the results, we can print nice LATEX tables.
 
-```{r inference, eval = FALSE}
+```{r inference, eval = TRUE}
 ## Inference with 4 groups.
 results <- inference_aggtree(groupings, n_groups = 4)
 
 ## LATEX.
 print(results, table = "diff")
+
 print(results, table = "avg_char")
 ```
 
-### Appendix
-The point of estimating the linear models is to get standard errors for the GATEs. Under an honesty condition, we can use the estimated standard errors to conduct valid inference as usual, e.g., by constructing conventional confidence intervals. Honesty is a subsample-splitting technique that requires that different observations are used to form the subgroups and estimate the GATEs. `inference_aggtree` always uses the honest sample to estimate the linear models below (unless we called `build_aggtree` without using the honesty settings).
-
-If we set `method = "raw"`, `inference_aggtree` estimates via OLS the following linear model:
-
-\begin{equation}
-    Y_i = \sum_{l = 1}^{|\mathcal{T_{\alpha}}|} L_{i, l} \, \gamma_l + \sum_{l = 1}^{|\mathcal{T}_{\alpha}|} L_{i, l} \, D_i \, \beta_l + \epsilon_i
-\end{equation}
-
-with $|\mathcal{T}_{\alpha}|$ the number of leaves of a particular tree $\mathcal{T}_{\alpha}$, and $L_{i, l}$ a dummy variable equal to one if the $i$-th unit falls in the $l$-th leaf of $\mathcal{T}_{\alpha}$. Exploiting the random assignment to treatment, we can show that each $\beta_l$ identifies the GATE in the $l$-th leaf. Under honesty, the OLS estimator $\hat{\beta}_l$ of $\beta_l$ is root-$n$ consistent and asymptotically normal.
-
-If we set `method = "aipw"`, `inference_aggtree` estimates via OLS the following linear model:
-
-\begin{equation}
-    \widehat{\Gamma}_i = \sum_{l = 1}^{|\mathcal{T}_{\alpha}|} L_{i, l} \, \beta_l + \epsilon_i
-\end{equation}
-
-where $\Gamma_i$ are the following doubly-robust scores:
-
-\begin{equation*}
-    \Gamma_i = \mu \left( 1, X_i \right) - \mu \left( 0, X_i \right) + \frac{D_i \left[ Y_i - \mu \left( 1, X_i \right) \right]}{p \left( X_i \right)}  - \frac{ \left( 1 - D_i \right) \left[ Y_i - \mu \left( 0, X_i \right) \right]}{1 - p \left( X_i \right)}
-\end{equation*} 
-
-with $\mu \left(D_i, X_i \right) = \mathbb{E} \left[ Y_i | D_i, Z_i \right]$ the conditional mean of $Y_i$ and $p \left( X_i \right) = \mathbb{P} \left( D_i = 1 | X_i \right)$ the propensity score. These scores are inherited by the scores used in the `build_aggtree` call. As before, we can show that each $\beta_l$ identifies the GATE in the $l$-th leaf, this time even in observational studies. Under honesty, the OLS estimator $\hat{\beta}_l$ of $\beta_l$ is root-$n$ consistent and asymptotically normal, provided that the $\Gamma_i$ are cross-fitted and that the product of the convergence rates of the estimators of the nuisance functions $\mu \left( \cdot, \cdot \right)$ and $p \left( \cdot \right)$ is faster than $n^{1/2}$.
+[^1]: Check the [inference vignette](https://riccardo-df.github.io/aggTrees/articles/inference.html) for more details. 
+[^2]: See footnote 1.
+[^3]: See footnote 1.

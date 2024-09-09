@@ -340,44 +340,82 @@ code > span.er { color: #a61717; background-color: #e3d2d2; }
 
 
 
-<p>In this tutorial, we show a typical usage of the package. For
-illustration purposes, let us generate some data:</p>
-<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="do">## Generate data.</span></span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1986</span>)</span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="dv">1000</span></span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>k <span class="ot">&lt;-</span> <span class="dv">3</span></span>
-<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>X <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="fu">rnorm</span>(n <span class="sc">*</span> k), <span class="at">ncol =</span> k)</span>
-<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="fu">colnames</span>(X) <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">&quot;x&quot;</span>, <span class="fu">seq_len</span>(k))</span>
-<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>D <span class="ot">&lt;-</span> <span class="fu">rbinom</span>(n, <span class="at">size =</span> <span class="dv">1</span>, <span class="at">prob =</span> <span class="fl">0.5</span>)</span>
-<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>mu0 <span class="ot">&lt;-</span> <span class="fl">0.5</span> <span class="sc">*</span> X[, <span class="dv">1</span>]</span>
-<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>mu1 <span class="ot">&lt;-</span> <span class="fl">0.5</span> <span class="sc">*</span> X[, <span class="dv">1</span>] <span class="sc">+</span> X[, <span class="dv">2</span>]</span>
-<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>y <span class="ot">&lt;-</span> mu0 <span class="sc">+</span> D <span class="sc">*</span> (mu1 <span class="sc">-</span> mu0) <span class="sc">+</span> <span class="fu">rnorm</span>(n)</span></code></pre></div>
+<p>In this tutorial, we show how to use the <code>aggTrees</code>
+package to discover heterogeneous subgroups in a
+selection-on-observables setting.</p>
+<div id="methodology-overview" class="section level2">
+<h2>Methodology Overview</h2>
+<p>The approach consists of three steps:</p>
+<ol style="list-style-type: decimal">
+<li>Estimate the conditional average treatment effects (CATEs);</li>
+<li>Approximate the CATEs by a decision tree;</li>
+<li>Prune the tree.</li>
+</ol>
+<p>This way, we generate a sequence of groupings, one for each
+granularity level.</p>
+<p>The resulting sequence is nested in the sense that subgroups formed
+at a given level of granularity are never broken at coarser levels. This
+guarantees consistency of the results across the different granularity
+levels, generally considered a basic requirement that every
+classification system should satisfy. Moreover, each grouping features
+an optimality property in that it ensures that the loss in explained
+heterogeneity resulting from aggregation is minimized.</p>
+<p>Given the sequence of groupings, we can estimate the group average
+treatment effects (GATEs) as we like. The package supports two
+estimators, based on differences in mean outcomes between treated and
+control units (unbiased only in randomized experiments) and on debiased
+machine learning procedures (unbiased also in observational
+studies).</p>
+<p>The package also allows to get standard errors for the GATEs by
+estimating via OLS appropriate linear models. Then, under an “honesty”
+condition, we can use the estimated standard errors to conduct valid
+inference about the GATEs as usual, e.g., by constructing conventional
+confidence intervals.<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a></p>
+</div>
+<div id="code" class="section level2">
+<h2>Code</h2>
+<p>For illustration purposes, let us generate some data. We also split
+the observed sample into a training sample and an honest sample of equal
+sizes, as this will be necessary to achieve valid inference about the
+GATEs later on.</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="do">## Generate data.</span></span>
+<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1986</span>)</span>
+<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a></span>
+<span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a>n <span class="ot">&lt;-</span> <span class="dv">500</span> <span class="co"># Small sample size due to compliance with CRAN notes.</span></span>
+<span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a>k <span class="ot">&lt;-</span> <span class="dv">3</span></span>
+<span id="cb1-6"><a href="#cb1-6" tabindex="-1"></a></span>
+<span id="cb1-7"><a href="#cb1-7" tabindex="-1"></a>X <span class="ot">&lt;-</span> <span class="fu">matrix</span>(<span class="fu">rnorm</span>(n <span class="sc">*</span> k), <span class="at">ncol =</span> k)</span>
+<span id="cb1-8"><a href="#cb1-8" tabindex="-1"></a><span class="fu">colnames</span>(X) <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">&quot;x&quot;</span>, <span class="fu">seq_len</span>(k))</span>
+<span id="cb1-9"><a href="#cb1-9" tabindex="-1"></a>D <span class="ot">&lt;-</span> <span class="fu">rbinom</span>(n, <span class="at">size =</span> <span class="dv">1</span>, <span class="at">prob =</span> <span class="fl">0.5</span>)</span>
+<span id="cb1-10"><a href="#cb1-10" tabindex="-1"></a>mu0 <span class="ot">&lt;-</span> <span class="fl">0.5</span> <span class="sc">*</span> X[, <span class="dv">1</span>]</span>
+<span id="cb1-11"><a href="#cb1-11" tabindex="-1"></a>mu1 <span class="ot">&lt;-</span> <span class="fl">0.5</span> <span class="sc">*</span> X[, <span class="dv">1</span>] <span class="sc">+</span> X[, <span class="dv">2</span>]</span>
+<span id="cb1-12"><a href="#cb1-12" tabindex="-1"></a>Y <span class="ot">&lt;-</span> mu0 <span class="sc">+</span> D <span class="sc">*</span> (mu1 <span class="sc">-</span> mu0) <span class="sc">+</span> <span class="fu">rnorm</span>(n)</span>
+<span id="cb1-13"><a href="#cb1-13" tabindex="-1"></a></span>
+<span id="cb1-14"><a href="#cb1-14" tabindex="-1"></a><span class="do">## Sample split.</span></span>
+<span id="cb1-15"><a href="#cb1-15" tabindex="-1"></a>splits <span class="ot">&lt;-</span> <span class="fu">sample_split</span>(<span class="fu">length</span>(Y), <span class="at">training_frac =</span> <span class="fl">0.5</span>)</span>
+<span id="cb1-16"><a href="#cb1-16" tabindex="-1"></a>training_idx <span class="ot">&lt;-</span> splits<span class="sc">$</span>training_idx</span>
+<span id="cb1-17"><a href="#cb1-17" tabindex="-1"></a>honest_idx <span class="ot">&lt;-</span> splits<span class="sc">$</span>honest_idx</span>
+<span id="cb1-18"><a href="#cb1-18" tabindex="-1"></a></span>
+<span id="cb1-19"><a href="#cb1-19" tabindex="-1"></a>Y_tr <span class="ot">&lt;-</span> Y[training_idx]</span>
+<span id="cb1-20"><a href="#cb1-20" tabindex="-1"></a>D_tr <span class="ot">&lt;-</span> D[training_idx]</span>
+<span id="cb1-21"><a href="#cb1-21" tabindex="-1"></a>X_tr <span class="ot">&lt;-</span> X[training_idx, ]</span>
+<span id="cb1-22"><a href="#cb1-22" tabindex="-1"></a></span>
+<span id="cb1-23"><a href="#cb1-23" tabindex="-1"></a>Y_hon <span class="ot">&lt;-</span> Y[honest_idx]</span>
+<span id="cb1-24"><a href="#cb1-24" tabindex="-1"></a>D_hon <span class="ot">&lt;-</span> D[honest_idx]</span>
+<span id="cb1-25"><a href="#cb1-25" tabindex="-1"></a>X_hon <span class="ot">&lt;-</span> X[honest_idx, ]</span></code></pre></div>
+<div id="cates-estimation" class="section level3">
+<h3>CATEs Estimation</h3>
+<p>First, we need to estimate the CATEs. This can be achieved with any
+estimator we like. Here we use the causal forest estimator. The CATEs
+are estimated using only the training sample.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="do">## Estimate the CATEs. Use only training sample.</span></span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a>forest <span class="ot">&lt;-</span> <span class="fu">causal_forest</span>(X_tr, Y_tr, D_tr) </span>
+<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a></span>
+<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a>cates_tr <span class="ot">&lt;-</span> <span class="fu">predict</span>(forest, X_tr)<span class="sc">$</span>predictions</span>
+<span id="cb2-5"><a href="#cb2-5" tabindex="-1"></a>cates_hon <span class="ot">&lt;-</span> <span class="fu">predict</span>(forest, X_hon)<span class="sc">$</span>predictions</span></code></pre></div>
+</div>
 <div id="constructing-the-sequence-of-groupings" class="section level3">
 <h3>Constructing the Sequence of Groupings</h3>
-<p>To construct the sequence of optimal groupings, we first need to
-estimate the CATEs. Here we use the causal forest estimator. To achieve
-valid inference about the GATEs, we split the sample into a training
-sample and an honest sample of equal sizes. The forest is built using
-only the training sample.</p>
-<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="do">## Sample split.</span></span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>splits <span class="ot">&lt;-</span> <span class="fu">sample_split</span>(<span class="fu">length</span>(y), <span class="at">training_frac =</span> <span class="fl">0.5</span>)</span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>training_idx <span class="ot">&lt;-</span> splits<span class="sc">$</span>training_idx</span>
-<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>honest_idx <span class="ot">&lt;-</span> splits<span class="sc">$</span>honest_idx</span>
-<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>y_tr <span class="ot">&lt;-</span> y[training_idx]</span>
-<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>D_tr <span class="ot">&lt;-</span> D[training_idx]</span>
-<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>X_tr <span class="ot">&lt;-</span> X[training_idx, ]</span>
-<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>y_hon <span class="ot">&lt;-</span> y[honest_idx]</span>
-<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>D_hon <span class="ot">&lt;-</span> D[honest_idx]</span>
-<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>X_hon <span class="ot">&lt;-</span> X[honest_idx, ]</span>
-<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a><span class="do">## Estimate the CATEs. Use only training sample.</span></span>
-<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(grf)</span>
-<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>forest <span class="ot">&lt;-</span> <span class="fu">causal_forest</span>(X_tr, y_tr, D_tr) </span>
-<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>cates <span class="ot">&lt;-</span> <span class="fu">predict</span>(forest, X)<span class="sc">$</span>predictions</span></code></pre></div>
 <p>Now we use the <code>build_aggtree</code> function to construct the
 sequence of groupings. This function approximates the estimated CATEs by
 a decision tree using only the training sample and computes node
@@ -390,25 +428,40 @@ taking the differences between the mean outcomes of treated and control
 units in each node. This is an unbiased estimator (only) in randomized
 experiments;</li>
 <li>If we set <code>method = &quot;aipw&quot;</code>, the GATEs are estimated by
-averaging doubly-robust scores (see Appendix below) in each node. This
-is an unbiased estimator also in observational studies under particular
-conditions on the construction of the scores.</li>
+averaging doubly-robust scores in each node. This is an unbiased
+estimator also in observational studies under particular conditions on
+the construction of the scores.<a href="#fn2" class="footnote-ref" id="fnref2"><sup>2</sup></a></li>
 </ol>
-<p>The doubly-robust scores can be estimated separately and passed in by
-the <code>scores</code> argument. Otherwise, they are estimated
-internally. Notice the use of the <code>is_honest</code> argument, a
-logical vector denoting which observations we allocated to the honest
-sample. This way, <code>build_aggtree</code> knows which observations
-must be used to construct the tree and compute node predictions.</p>
-<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="do">## Construct the sequence. Use doubly-robust scores.</span></span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>groupings <span class="ot">&lt;-</span> <span class="fu">build_aggtree</span>(y, D, X, <span class="at">method =</span> <span class="st">&quot;aipw&quot;</span>, </span>
-<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>                           <span class="at">cates =</span> cates, <span class="at">is_honest =</span> <span class="dv">1</span><span class="sc">:</span><span class="fu">length</span>(y) <span class="sc">%in%</span> honest_idx)</span>
-<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="do">## Print.</span></span>
-<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(groupings)</span>
-<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a><span class="do">## Plot.</span></span>
-<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(groupings) <span class="co"># Try also setting &#39;sequence = TRUE&#39;.</span></span></code></pre></div>
+<p>The doubly-robust scores are estimated internally using 5-fold
+cross-fitting and only observations from the honest sample.</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a><span class="do">## Construct the sequence. Use doubly-robust scores (default option).</span></span>
+<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a>groupings <span class="ot">&lt;-</span> <span class="fu">build_aggtree</span>(Y_tr, D_tr, X_tr, <span class="co"># Training sample. </span></span>
+<span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a>                           Y_hon, D_hon, X_hon, <span class="co"># Honest sample.</span></span>
+<span id="cb3-4"><a href="#cb3-4" tabindex="-1"></a>                           <span class="at">cates_tr =</span> cates_tr, <span class="at">cates_hon =</span> cates_hon) <span class="co"># Predicted CATEs.</span></span>
+<span id="cb3-5"><a href="#cb3-5" tabindex="-1"></a></span>
+<span id="cb3-6"><a href="#cb3-6" tabindex="-1"></a><span class="do">## Print.</span></span>
+<span id="cb3-7"><a href="#cb3-7" tabindex="-1"></a><span class="fu">print</span>(groupings)</span>
+<span id="cb3-8"><a href="#cb3-8" tabindex="-1"></a><span class="co">#&gt; Honest estimates: TRUE </span></span>
+<span id="cb3-9"><a href="#cb3-9" tabindex="-1"></a><span class="co">#&gt; n= 250 </span></span>
+<span id="cb3-10"><a href="#cb3-10" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb3-11"><a href="#cb3-11" tabindex="-1"></a><span class="co">#&gt; node), split, n, deviance, yval</span></span>
+<span id="cb3-12"><a href="#cb3-12" tabindex="-1"></a><span class="co">#&gt;       * denotes terminal node</span></span>
+<span id="cb3-13"><a href="#cb3-13" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb3-14"><a href="#cb3-14" tabindex="-1"></a><span class="co">#&gt;  1) root 250 129.73920000  0.1388295  </span></span>
+<span id="cb3-15"><a href="#cb3-15" tabindex="-1"></a><span class="co">#&gt;    2) x2&lt; 0.4110066 169  16.71072000 -0.2614179  </span></span>
+<span id="cb3-16"><a href="#cb3-16" tabindex="-1"></a><span class="co">#&gt;      4) x2&lt; -0.3059088 97   1.76836600 -0.5823559  </span></span>
+<span id="cb3-17"><a href="#cb3-17" tabindex="-1"></a><span class="co">#&gt;        8) x2&lt; -0.5623933 74   0.36933210 -0.9021529 *</span></span>
+<span id="cb3-18"><a href="#cb3-18" tabindex="-1"></a><span class="co">#&gt;        9) x2&gt;=-0.5623933 23   0.08431861  0.1234030 *</span></span>
+<span id="cb3-19"><a href="#cb3-19" tabindex="-1"></a><span class="co">#&gt;      5) x2&gt;=-0.3059088 72   1.91750400  0.2199892  </span></span>
+<span id="cb3-20"><a href="#cb3-20" tabindex="-1"></a><span class="co">#&gt;       10) x2&lt; 0.1101004 39   0.35477380  0.3541915 *</span></span>
+<span id="cb3-21"><a href="#cb3-21" tabindex="-1"></a><span class="co">#&gt;       11) x2&gt;=0.1101004 33   0.25611350 -0.0618357 *</span></span>
+<span id="cb3-22"><a href="#cb3-22" tabindex="-1"></a><span class="co">#&gt;    3) x2&gt;=0.4110066 81   2.77193900  0.7918648  </span></span>
+<span id="cb3-23"><a href="#cb3-23" tabindex="-1"></a><span class="co">#&gt;      6) x2&lt; 0.6244741 16   0.36150400 -0.3732903 *</span></span>
+<span id="cb3-24"><a href="#cb3-24" tabindex="-1"></a><span class="co">#&gt;      7) x2&gt;=0.6244741 65   0.23338550  1.1225170 *</span></span>
+<span id="cb3-25"><a href="#cb3-25" tabindex="-1"></a></span>
+<span id="cb3-26"><a href="#cb3-26" tabindex="-1"></a><span class="do">## Plot.</span></span>
+<span id="cb3-27"><a href="#cb3-27" tabindex="-1"></a><span class="fu">plot</span>(groupings) <span class="co"># Try also setting &#39;sequence = TRUE&#39;.</span></span></code></pre></div>
+<p><img src="data:image/png;base64,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" /><!-- --></p>
 </div>
 <div id="further-analysis" class="section level3">
 <h3>Further Analysis</h3>
@@ -420,7 +473,7 @@ following:</p>
 <li>It gets standard errors for the GATEs by estimating via OLS
 appropriate linear models using the honest sample. The choice of the
 linear model depends on the <code>method</code> we used when we called
-<code>build_aggtree</code> (see Appendix below);</li>
+<code>build_aggtree</code>;<a href="#fn3" class="footnote-ref" id="fnref3"><sup>3</sup></a></li>
 <li>It tests the null hypotheses that the differences in the GATEs
 across all pairs of groups equal zero. Here, we account for multiple
 hypotheses testing by adjusting the <span class="math inline">\(p\)</span>-values using Holm’s procedure;</li>
@@ -428,66 +481,89 @@ hypotheses testing by adjusting the <span class="math inline">\(p\)</span>-value
 group.</li>
 </ol>
 <p>To report the results, we can print nice LATEX tables.</p>
-<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="do">## Inference with 4 groups.</span></span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>results <span class="ot">&lt;-</span> <span class="fu">inference_aggtree</span>(groupings, <span class="at">n_groups =</span> <span class="dv">4</span>)</span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="do">## LATEX.</span></span>
-<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(results, <span class="at">table =</span> <span class="st">&quot;diff&quot;</span>)</span>
-<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(results, <span class="at">table =</span> <span class="st">&quot;avg_char&quot;</span>)</span></code></pre></div>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a><span class="do">## Inference with 4 groups.</span></span>
+<span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a>results <span class="ot">&lt;-</span> <span class="fu">inference_aggtree</span>(groupings, <span class="at">n_groups =</span> <span class="dv">4</span>)</span>
+<span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a></span>
+<span id="cb4-4"><a href="#cb4-4" tabindex="-1"></a><span class="do">## LATEX.</span></span>
+<span id="cb4-5"><a href="#cb4-5" tabindex="-1"></a><span class="fu">print</span>(results, <span class="at">table =</span> <span class="st">&quot;diff&quot;</span>)</span>
+<span id="cb4-6"><a href="#cb4-6" tabindex="-1"></a><span class="co">#&gt; \begingroup</span></span>
+<span id="cb4-7"><a href="#cb4-7" tabindex="-1"></a><span class="co">#&gt;   \setlength{\tabcolsep}{8pt}</span></span>
+<span id="cb4-8"><a href="#cb4-8" tabindex="-1"></a><span class="co">#&gt;   \renewcommand{\arraystretch}{1.2}</span></span>
+<span id="cb4-9"><a href="#cb4-9" tabindex="-1"></a><span class="co">#&gt;   \begin{table}[b!]</span></span>
+<span id="cb4-10"><a href="#cb4-10" tabindex="-1"></a><span class="co">#&gt;     \centering</span></span>
+<span id="cb4-11"><a href="#cb4-11" tabindex="-1"></a><span class="co">#&gt;     \begin{adjustbox}{width = 1\textwidth}</span></span>
+<span id="cb4-12"><a href="#cb4-12" tabindex="-1"></a><span class="co">#&gt;     \begin{tabular}{@{\extracolsep{5pt}}l c c c c}</span></span>
+<span id="cb4-13"><a href="#cb4-13" tabindex="-1"></a><span class="co">#&gt;       \\[-1.8ex]\hline</span></span>
+<span id="cb4-14"><a href="#cb4-14" tabindex="-1"></a><span class="co">#&gt;       \hline \\[-1.8ex] </span></span>
+<span id="cb4-15"><a href="#cb4-15" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb4-16"><a href="#cb4-16" tabindex="-1"></a><span class="co">#&gt;       &amp; \textit{Leaf 1} &amp; \textit{Leaf 2} &amp; \textit{Leaf 3} &amp; \textit{Leaf 4} \\</span></span>
+<span id="cb4-17"><a href="#cb4-17" tabindex="-1"></a><span class="co">#&gt;       \addlinespace[2pt]</span></span>
+<span id="cb4-18"><a href="#cb4-18" tabindex="-1"></a><span class="co">#&gt;       \hline \\[-1.8ex] </span></span>
+<span id="cb4-19"><a href="#cb4-19" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb4-20"><a href="#cb4-20" tabindex="-1"></a><span class="co">#&gt;       \multirow{3}{*}{GATEs} &amp; -0.582 &amp; -0.373 &amp;  0.220 &amp;  1.123 \\</span></span>
+<span id="cb4-21"><a href="#cb4-21" tabindex="-1"></a><span class="co">#&gt;       &amp; [-1.023, -0.141] &amp; [-1.408,  0.662] &amp; [-0.307,  0.747] &amp; [ 0.641,  1.605] \\</span></span>
+<span id="cb4-22"><a href="#cb4-22" tabindex="-1"></a><span class="co">#&gt;       &amp; \{NA, NA\} &amp; \{NA, NA\} &amp; \{NA, NA\} &amp; \{NA, NA\} \\ </span></span>
+<span id="cb4-23"><a href="#cb4-23" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb4-24"><a href="#cb4-24" tabindex="-1"></a><span class="co">#&gt;       \addlinespace[2pt]</span></span>
+<span id="cb4-25"><a href="#cb4-25" tabindex="-1"></a><span class="co">#&gt;       \hline \\[-1.8ex] </span></span>
+<span id="cb4-26"><a href="#cb4-26" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb4-27"><a href="#cb4-27" tabindex="-1"></a><span class="co">#&gt;       \textit{Leaf 1} &amp; NA &amp; NA &amp; NA &amp; NA \\</span></span>
+<span id="cb4-28"><a href="#cb4-28" tabindex="-1"></a><span class="co">#&gt;             &amp; (NA) &amp; (NA) &amp; (NA) &amp; (NA) \\ </span></span>
+<span id="cb4-29"><a href="#cb4-29" tabindex="-1"></a><span class="co">#&gt;       \textit{Leaf 2} &amp; 0.21 &amp;   NA &amp;   NA &amp; NA \\</span></span>
+<span id="cb4-30"><a href="#cb4-30" tabindex="-1"></a><span class="co">#&gt;             &amp; (0.716) &amp; (   NA) &amp; (   NA) &amp; (NA) \\ </span></span>
+<span id="cb4-31"><a href="#cb4-31" tabindex="-1"></a><span class="co">#&gt;       \textit{Leaf 3} &amp; 0.80 &amp; 0.59 &amp;   NA &amp; NA \\</span></span>
+<span id="cb4-32"><a href="#cb4-32" tabindex="-1"></a><span class="co">#&gt;             &amp; (0.069) &amp; (0.636) &amp; (   NA) &amp; (NA) \\ </span></span>
+<span id="cb4-33"><a href="#cb4-33" tabindex="-1"></a><span class="co">#&gt;       \textit{Leaf 4} &amp; 1.70 &amp; 1.50 &amp; 0.90 &amp; NA \\</span></span>
+<span id="cb4-34"><a href="#cb4-34" tabindex="-1"></a><span class="co">#&gt;             &amp; (0.000) &amp; (0.054) &amp; (0.056) &amp; (NA) \\ </span></span>
+<span id="cb4-35"><a href="#cb4-35" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb4-36"><a href="#cb4-36" tabindex="-1"></a><span class="co">#&gt;       \addlinespace[3pt]</span></span>
+<span id="cb4-37"><a href="#cb4-37" tabindex="-1"></a><span class="co">#&gt;       \\[-1.8ex]\hline</span></span>
+<span id="cb4-38"><a href="#cb4-38" tabindex="-1"></a><span class="co">#&gt;       \hline \\[-1.8ex]</span></span>
+<span id="cb4-39"><a href="#cb4-39" tabindex="-1"></a><span class="co">#&gt;     \end{tabular}</span></span>
+<span id="cb4-40"><a href="#cb4-40" tabindex="-1"></a><span class="co">#&gt;     \end{adjustbox}</span></span>
+<span id="cb4-41"><a href="#cb4-41" tabindex="-1"></a><span class="co">#&gt;     \caption{Point estimates and $95\%$ confidence intervals for the GATEs based on asymptotic normality (in square brackets) and on the percentiles of the bootstrap distribution (in curly braces). Leaves are sorted in increasing order of the GATEs. Additionally, the GATE differences across all pairs of leaves are displayed. $p$-values testing the null hypothesis that a single difference is zero are adjusted using Holm&#39;s procedure and reported in parenthesis under each point estimate.}</span></span>
+<span id="cb4-42"><a href="#cb4-42" tabindex="-1"></a><span class="co">#&gt;     \label{table_differences_gates}</span></span>
+<span id="cb4-43"><a href="#cb4-43" tabindex="-1"></a><span class="co">#&gt;     \end{table}</span></span>
+<span id="cb4-44"><a href="#cb4-44" tabindex="-1"></a><span class="co">#&gt; \endgroup</span></span>
+<span id="cb4-45"><a href="#cb4-45" tabindex="-1"></a></span>
+<span id="cb4-46"><a href="#cb4-46" tabindex="-1"></a><span class="fu">print</span>(results, <span class="at">table =</span> <span class="st">&quot;avg_char&quot;</span>)</span>
+<span id="cb4-47"><a href="#cb4-47" tabindex="-1"></a><span class="co">#&gt; \begingroup</span></span>
+<span id="cb4-48"><a href="#cb4-48" tabindex="-1"></a><span class="co">#&gt;   \setlength{\tabcolsep}{8pt}</span></span>
+<span id="cb4-49"><a href="#cb4-49" tabindex="-1"></a><span class="co">#&gt;   \renewcommand{\arraystretch}{1.1}</span></span>
+<span id="cb4-50"><a href="#cb4-50" tabindex="-1"></a><span class="co">#&gt;   \begin{table}[b!]</span></span>
+<span id="cb4-51"><a href="#cb4-51" tabindex="-1"></a><span class="co">#&gt;     \centering</span></span>
+<span id="cb4-52"><a href="#cb4-52" tabindex="-1"></a><span class="co">#&gt;     \begin{adjustbox}{width = 1\textwidth}</span></span>
+<span id="cb4-53"><a href="#cb4-53" tabindex="-1"></a><span class="co">#&gt;     \begin{tabular}{@{\extracolsep{5pt}}l c c c c c c c c }</span></span>
+<span id="cb4-54"><a href="#cb4-54" tabindex="-1"></a><span class="co">#&gt;       \\[-1.8ex]\hline</span></span>
+<span id="cb4-55"><a href="#cb4-55" tabindex="-1"></a><span class="co">#&gt;       \hline \\[-1.8ex]</span></span>
+<span id="cb4-56"><a href="#cb4-56" tabindex="-1"></a><span class="co">#&gt;       &amp; \multicolumn{2}{c}{\textit{Leaf 1}} &amp; \multicolumn{2}{c}{\textit{Leaf 2}} &amp; \multicolumn{2}{c}{\textit{Leaf 3}} &amp; \multicolumn{2}{c}{\textit{Leaf 4}} \\\cmidrule{2-3} \cmidrule{4-5} \cmidrule{6-7} \cmidrule{8-9} </span></span>
+<span id="cb4-57"><a href="#cb4-57" tabindex="-1"></a><span class="co">#&gt;       &amp; Mean &amp; (S.E.) &amp; Mean &amp; (S.E.) &amp; Mean &amp; (S.E.) &amp; Mean &amp; (S.E.) \\</span></span>
+<span id="cb4-58"><a href="#cb4-58" tabindex="-1"></a><span class="co">#&gt;       \addlinespace[2pt]</span></span>
+<span id="cb4-59"><a href="#cb4-59" tabindex="-1"></a><span class="co">#&gt;       \hline \\[-1.8ex] </span></span>
+<span id="cb4-60"><a href="#cb4-60" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb4-61"><a href="#cb4-61" tabindex="-1"></a><span class="co">#&gt;       \texttt{x1} &amp;  0.133 &amp; (0.099) &amp; -0.030 &amp; (0.202) &amp; -0.094 &amp; (0.144) &amp;  0.083 &amp; (0.106) \\ </span></span>
+<span id="cb4-62"><a href="#cb4-62" tabindex="-1"></a><span class="co">#&gt;       \texttt{x2} &amp; -0.955 &amp; (0.057) &amp;  0.505 &amp; (0.012) &amp;  0.010 &amp; (0.026) &amp;  1.222 &amp; (0.050) \\ </span></span>
+<span id="cb4-63"><a href="#cb4-63" tabindex="-1"></a><span class="co">#&gt;       \texttt{x3} &amp;  0.083 &amp; (0.112) &amp; -0.542 &amp; (0.197) &amp;  0.316 &amp; (0.137) &amp; -0.036 &amp; (0.107) \\ </span></span>
+<span id="cb4-64"><a href="#cb4-64" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb4-65"><a href="#cb4-65" tabindex="-1"></a><span class="co">#&gt;       \addlinespace[3pt]</span></span>
+<span id="cb4-66"><a href="#cb4-66" tabindex="-1"></a><span class="co">#&gt;       \\[-1.8ex]\hline</span></span>
+<span id="cb4-67"><a href="#cb4-67" tabindex="-1"></a><span class="co">#&gt;       \hline \\[-1.8ex]</span></span>
+<span id="cb4-68"><a href="#cb4-68" tabindex="-1"></a><span class="co">#&gt;     \end{tabular}</span></span>
+<span id="cb4-69"><a href="#cb4-69" tabindex="-1"></a><span class="co">#&gt;     \end{adjustbox}</span></span>
+<span id="cb4-70"><a href="#cb4-70" tabindex="-1"></a><span class="co">#&gt;     \caption{Average characteristics of units in each leaf, obtained by regressing each covariate on a set of dummies denoting leaf membership . Standard errors are estimated via the Eicker-Huber-White estimator. Leaves are sorted in increasing order of the GATEs.}</span></span>
+<span id="cb4-71"><a href="#cb4-71" tabindex="-1"></a><span class="co">#&gt;     \label{table_average_characteristics_leaves}</span></span>
+<span id="cb4-72"><a href="#cb4-72" tabindex="-1"></a><span class="co">#&gt;     \end{table}</span></span>
+<span id="cb4-73"><a href="#cb4-73" tabindex="-1"></a><span class="co">#&gt; \endgroup</span></span></code></pre></div>
 </div>
-<div id="appendix" class="section level3">
-<h3>Appendix</h3>
-<p>The point of estimating the linear models is to get standard errors
-for the GATEs. Under an honesty condition, we can use the estimated
-standard errors to conduct valid inference as usual, e.g., by
-constructing conventional confidence intervals. Honesty is a
-subsample-splitting technique that requires that different observations
-are used to form the subgroups and estimate the GATEs.
-<code>inference_aggtree</code> always uses the honest sample to estimate
-the linear models below (unless we called <code>build_aggtree</code>
-without using the honesty settings).</p>
-<p>If we set <code>method = &quot;raw&quot;</code>, <code>inference_aggtree</code>
-estimates via OLS the following linear model:</p>
-<p><span class="math display">\[\begin{equation}
-    Y_i = \sum_{l = 1}^{|\mathcal{T_{\alpha}}|} L_{i, l} \, \gamma_l +
-\sum_{l = 1}^{|\mathcal{T}_{\alpha}|} L_{i, l} \, D_i \, \beta_l +
-\epsilon_i
-\end{equation}\]</span></p>
-<p>with <span class="math inline">\(|\mathcal{T}_{\alpha}|\)</span> the
-number of leaves of a particular tree <span class="math inline">\(\mathcal{T}_{\alpha}\)</span>, and <span class="math inline">\(L_{i, l}\)</span> a dummy variable equal to one if
-the <span class="math inline">\(i\)</span>-th unit falls in the <span class="math inline">\(l\)</span>-th leaf of <span class="math inline">\(\mathcal{T}_{\alpha}\)</span>. Exploiting the
-random assignment to treatment, we can show that each <span class="math inline">\(\beta_l\)</span> identifies the GATE in the <span class="math inline">\(l\)</span>-th leaf. Under honesty, the OLS
-estimator <span class="math inline">\(\hat{\beta}_l\)</span> of <span class="math inline">\(\beta_l\)</span> is root-<span class="math inline">\(n\)</span> consistent and asymptotically
-normal.</p>
-<p>If we set <code>method = &quot;aipw&quot;</code>,
-<code>inference_aggtree</code> estimates via OLS the following linear
-model:</p>
-<p><span class="math display">\[\begin{equation}
-    \widehat{\Gamma}_i = \sum_{l = 1}^{|\mathcal{T}_{\alpha}|} L_{i, l}
-\, \beta_l + \epsilon_i
-\end{equation}\]</span></p>
-<p>where <span class="math inline">\(\Gamma_i\)</span> are the following
-doubly-robust scores:</p>
-<p><span class="math display">\[\begin{equation*}
-    \Gamma_i = \mu \left( 1, X_i \right) - \mu \left( 0, X_i \right) +
-\frac{D_i \left[ Y_i - \mu \left( 1, X_i \right) \right]}{p \left( X_i
-\right)}  - \frac{ \left( 1 - D_i \right) \left[ Y_i - \mu \left( 0, X_i
-\right) \right]}{1 - p \left( X_i \right)}
-\end{equation*}\]</span></p>
-<p>with <span class="math inline">\(\mu \left(D_i, X_i \right) =
-\mathbb{E} \left[ Y_i | D_i, Z_i \right]\)</span> the conditional mean
-of <span class="math inline">\(Y_i\)</span> and <span class="math inline">\(p \left( X_i \right) = \mathbb{P} \left( D_i = 1 |
-X_i \right)\)</span> the propensity score. These scores are inherited by
-the scores used in the <code>build_aggtree</code> call. As before, we
-can show that each <span class="math inline">\(\beta_l\)</span>
-identifies the GATE in the <span class="math inline">\(l\)</span>-th
-leaf, this time even in observational studies. Under honesty, the OLS
-estimator <span class="math inline">\(\hat{\beta}_l\)</span> of <span class="math inline">\(\beta_l\)</span> is root-<span class="math inline">\(n\)</span> consistent and asymptotically normal,
-provided that the <span class="math inline">\(\Gamma_i\)</span> are
-cross-fitted and that the product of the convergence rates of the
-estimators of the nuisance functions <span class="math inline">\(\mu
-\left( \cdot, \cdot \right)\)</span> and <span class="math inline">\(p
-\left( \cdot \right)\)</span> is faster than <span class="math inline">\(n^{1/2}\)</span>.</p>
+</div>
+<div class="footnotes footnotes-end-of-document">
+<hr />
+<ol>
+<li id="fn1"><p>Check the <a href="https://riccardo-df.github.io/aggTrees/articles/inference.html">inference
+vignette</a> for more details.<a href="#fnref1" class="footnote-back">↩︎</a></p></li>
+<li id="fn2"><p>See footnote 1.<a href="#fnref2" class="footnote-back">↩︎</a></p></li>
+<li id="fn3"><p>See footnote 1.<a href="#fnref3" class="footnote-back">↩︎</a></p></li>
+</ol>
 </div>
 
 
